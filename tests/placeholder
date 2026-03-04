@@ -1,1 +1,442 @@
+-- BRONZE CRM_CUST_INFO
+-- Check for nulls duplicates in primary key
+SELECT
+    cst_id,
+    count(*)
+FROM bronze.crm_cust_info
+GROUP BY 1
+HAVING COUNT(*) > 1 OR cst_id IS NULL;
+
+SELECT DISTINCT cst_gndr
+FROM bronze.crm_cust_info;
+
+
+SELECT DISTINCT cst_gndr
+FROM bronze.crm_cust_info;
+
+
+SELECT
+    cst_id,
+    count(*)
+FROM silver.crm_cust_info
+GROUP BY 1
+HAVING COUNT(*) > 1 OR cst_id IS NULL;
+
+
+SELECT
+    cst_firstname
+FROM silver.crm_cust_info
+WHERE cst_firstname != TRIM(cst_firstname);
+
+SELECT
+    cst_lastname
+FROM silver.crm_cust_info
+WHERE cst_lastname != TRIM(cst_lastname);
+
+SELECT DISTINCT cst_gndr
+FROM silver.crm_cust_info;
+
+-- Check unwanted spaces
+SELECT
+    cst_firstname
+FROM bronze.crm_cust_info
+WHERE cst_firstname != TRIM(cst_firstname);
+
+SELECT
+    cst_lastname
+FROM bronze.crm_cust_info
+WHERE cst_lastname != TRIM(cst_lastname);
+
+SELECT
+    cst_gndr
+FROM bronze.crm_cust_info
+WHERE cst_gndr != TRIM(cst_gndr);
+
+
+SELECT
+    *
+FROM silver.crm_cust_info
+LIMIT 10;
+
+
+-- Check unwanted spaces
+SELECT
+    cst_firstname
+FROM bronze.crm_cust_info
+WHERE cst_firstname != TRIM(cst_firstname);
+
+SELECT
+    cst_lastname
+FROM bronze.crm_cust_info
+WHERE cst_lastname != TRIM(cst_lastname);
+
+SELECT
+    cst_gndr
+FROM bronze.crm_cust_info
+WHERE cst_gndr != TRIM(cst_gndr);
+
+
+SELECT
+    *
+FROM silver.crm_cust_info
+LIMIT 10;
+
+------------------------------------------------------
+-- CRM_PRD_INFO CHECK
+-- Get the info from pdr_key to join to others later
+SELECT
+    prd_id,
+    COUNT(*) n
+FROM bronze.crm_prd_info
+GROUP BY 1
+HAVING count(*) > 1 OR prd_id IS NULL;
+
+SELECT
+    prd_id,
+    REPLACE(SUBSTR(prd_key, 1, 5), '-', '_') as cat_id,
+    substr(prd_key, 7, LENGTH(prd_key)) as prd_key,
+    prd_nm,
+    coalesce(prd_cost, 0) AS prc_cost,
+    CASE WHEN UPPER(TRIM(prd_line)) = 'M' THEN 'Mountain'
+         WHEN UPPER(TRIM(prd_line)) = 'R' THEN 'Road'
+         WHEN UPPER(TRIM(prd_line)) = 'S' THEN 'Other Sales'
+         WHEN UPPER(TRIM(prd_line)) = 'T' THEN 'Touring'
+         ELSE 'N/A'
+    END AS prd_line,
+    CAST(prd_start_dt AS DATE) prd_srart_dt,
+    CAST(LEAD(prd_start_dt) OVER(PARTITION BY prd_key ORDER BY prd_start_dt) - INTERVAL '1 day' AS DATE) as prd_end_dt
+FROM bronze.crm_prd_info;
+-- WHERE substr(prd_key, 7, LENGTH(prd_key)) in
+--(SELECT
+    --sls_prd_key FROM bronze.crm_sales_details);
+--WHERE REPLACE(SUBSTR(prd_key, 1, 5), '-', '_') NOT IN
+--(SELECT DISTINCT id FROM bronze.erp_px_cat_g1v2);
+
+SELECT
+    sls_prd_key FROM bronze.crm_sales_details;
+
+-- Check for unwanted space
+SELECT
+    prd_nm
+FROM bronze.crm_prd_info
+WHERE prd_nm != TRIM(prd_nm);
+
+-- Check for nulls or negative numbers
+SELECT
+    prd_cost
+FROM bronze.crm_prd_info
+WHERE prd_cost < 0 OR prd_cost IS NULL;
+
+-- Data standardization and consistency
+SELECT
+    DISTINCT prd_line
+FROM bronze.crm_prd_info;
+
+-- Check for invalid date orders
+SELECT
+    *
+FROM bronze.crm_prd_info
+WHERE prd_end_dt < prd_start_dt;
+
+SELECT
+    *,
+    LEAD(prd_start_dt) OVER(PARTITION BY prd_key ORDER BY prd_start_dt) - INTERVAL '1 day'as test
+FROM bronze.crm_prd_info
+WHERE prd_key IN ('AC-HE-HL-U509-R', 'AC-HE-HL-U509');
+
+-- SILVER CHECK
+SELECT
+    prd_cost
+FROM silver.crm_prd_info
+WHERE prd_cost < 0 OR prd_cost IS NULL;
+
+SELECT
+    DISTINCT prd_line
+FROM silver.crm_prd_info;
+
+SELECT
+    *
+FROM silver.crm_prd_info
+WHERE prd_end_dt < prd_start_dt;
+
+
+---------------------------------------------------
+--CRM SALES DETAILS
+INSERT INTO silver.crm_sales_details(
+    sls_ord_num,
+    sls_prd_key,
+    sls_cust_id,
+    sls_order_dt,
+    sls_ship_dt,
+    sls_due_dt,
+    sls_sales,
+    sls_quantity,
+    sls_price
+)
+SELECT
+    sls_ord_num,
+    sls_prd_key,
+    sls_cust_id,
+    CASE WHEN sls_order_dt = 0 OR length(CAST(sls_order_dt AS TEXT)) != 8 THEN NULL
+         ELSE CAST(CAST(sls_order_dt AS VARCHAR) AS DATE)
+    END AS sls_order_dt,
+    CASE WHEN sls_ship_dt = 0 OR length(CAST(sls_ship_dt AS TEXT)) != 8 THEN NULL
+         ELSE CAST(CAST(sls_ship_dt AS VARCHAR) AS DATE)
+    END AS sls_ship_dt,
+    CASE WHEN sls_due_dt = 0 OR length(CAST(sls_due_dt AS TEXT)) != 8 THEN NULL
+         ELSE CAST(CAST(sls_due_dt AS VARCHAR) AS DATE)
+    END AS sls_due_dt,
+    CASE WHEN sls_sales IS NULL OR sls_sales <= 0 OR sls_sales != sls_quantity * abs(sls_price)
+            THEN sls_quantity * abs(sls_price)
+    ELSE sls_sales
+    END as sls_sales,
+    sls_quantity,
+    CASE WHEN sls_price IS NULL OR sls_price <= 0
+            THEN sls_sales / NULLIF(sls_quantity,0)
+    ELSE sls_price
+END AS sls_price
+FROM bronze.crm_sales_details;
+-- Check if compatible with other tables -----------------------
+--WHERE sls_ord_num != TRIM(sls_ord_num);
+--WHERE sls_prd_key NOT IN(SELECT prd_key FROM silver.crm_prd_info);
+-- WHERE sls_cust_id NOT IN(SELECT cst_id FROM silver.crm_cust_info);
+
+SELECT
+    NULLIF(sls_order_dt,0) sls_order_dt
+FROM bronze.crm_sales_details
+WHERE sls_order_dt <= 0 OR length(CAST(sls_order_dt AS TEXT)) != 8
+OR sls_order_dt > 20500101;
+
+
+SELECT
+    NULLIF(sls_ship_dt,0) sls_order_dt
+FROM bronze.crm_sales_details
+WHERE sls_ship_dt <= 0 OR length(CAST(sls_ship_dt AS TEXT)) != 8
+OR sls_ship_dt > 20500101
+OR sls_ship_dt < 19000101;
+
+
+SELECT
+    NULLIF(sls_due_dt,0) sls_order_dt
+FROM bronze.crm_sales_details
+WHERE sls_due_dt <= 0 OR length(CAST(sls_due_dt AS TEXT)) != 8
+OR sls_due_dt > 20500101
+OR sls_due_dt < 19000101;
+
+-- Last date checks
+SELECT
+    *
+FROM bronze.crm_sales_details
+WHERE sls_order_dt > sls_due_dt OR sls_order_dt > sls_ship_dt;
+
+
+-- Check for sales, quantity and price
+SELECT DISTINCT
+    sls_sales as old_sales,
+    sls_quantity,
+    sls_price as old_price,
+    CASE WHEN sls_sales IS NULL OR sls_sales <= 0 OR sls_sales != sls_quantity * abs(sls_price)
+            THEN sls_quantity * abs(sls_price)
+    ELSE sls_sales
+END as sls_sales,
+
+    CASE WHEN sls_price IS NULL OR sls_price <= 0
+            THEN sls_sales / NULLIF(sls_quantity,0)
+    ELSE sls_price
+END AS sls_price
+FROM bronze.crm_sales_details
+WHERE sls_sales != sls_price * sls_quantity
+OR sls_sales IS NULL OR sls_quantity IS NULL OR sls_price IS NULL
+OR sls_sales <= 0 OR sls_quantity <= 0 OR sls_price <= 0
+ORDER BY sls_sales, sls_quantity, sls_price;
+
+-- IF sales is negative, zero or null derive it using quantity and price
+-- IF price is zero or null, calculate it using sales and quantity
+-- If price is negative, convert it to a positive value
+
+SELECT DISTINCT
+    sls_sales,
+    sls_quantity,
+    sls_price
+
+FROM silver.crm_sales_details
+WHERE sls_sales != sls_price * sls_quantity
+OR sls_sales IS NULL OR sls_quantity IS NULL OR sls_price IS NULL
+OR sls_sales <= 0 OR sls_quantity <= 0 OR sls_price <= 0
+ORDER BY sls_sales, sls_quantity, sls_price;
+
+
+
+
+SELECT
+    *
+FROM silver.crm_sales_details;
+
+-- DONE WITH SALES_DETAILS!!
+------------------------------------------------
+-- ERP_CUST_az12
+
+SELECT
+    CASE WHEN cid LIKE 'NAS%' THEN substr(cid, 4, length(cid))
+         ELSE cid
+    END cid,
+    CASE WHEN bdate > CURRENT_TIMESTAMP THEN NULL
+        ELSE bdate
+    END AS bdate,
+    gen
+FROM bronze.erp_cust_az12;
+--where cid LIKE '%AW00011000';
+
+SELECT
+    *
+FROM silver.crm_cust_info;
+
+
+-- CID CLEANUP
+SELECT
+    cid,
+    CASE WHEN cid LIKE 'NAS%' THEN substr(cid, 4, length(cid))
+         ELSE cid
+    END cid,
+    CASE WHEN bdate > CURRENT_TIMESTAMP THEN NULL
+        ELSE bdate
+    END AS bdate,
+    CASE WHEN UPPER(TRIM(gen)) IN ('F', 'FEMALE') THEN 'Female'
+    WHEN UPPER(TRIM(gen)) IN ('M', 'MALE') THEN 'Male'
+    ELSE 'N/A'
+    END AS gen
+FROM bronze.erp_cust_az12
+WHERE CASE WHEN cid LIKE 'NAS%' THEN substr(cid, 4, length(cid))
+         ELSE cid
+    END NOT IN (SELECT DISTINCT cst_key FROM silver.crm_cust_info);
+
+-- BDATE CLEANUP
+SELECT DISTINCT
+    bdate
+FROM bronze.erp_cust_az12
+WHERE bdate < '1924-01-01' OR bdate > CURRENT_TIMESTAMP;
+
+-- GEN CLEANUP
+
+SELECT
+    DISTINCT gen,
+    CASE WHEN UPPER(TRIM(gen)) IN ('F', 'FEMALE') THEN 'Female'
+    WHEN UPPER(TRIM(gen)) IN ('M', 'MALE') THEN 'Male'
+    ELSE 'N/A'
+    END AS gen
+FROM bronze.erp_cust_az12;
+
+
+-- CID, BDATE AND GEN FINISH
+TRUNCATE TABLE silver.erp_cust_az12;
+INSERT INTO silver.erp_cust_az12(cid, bdate, gen)
+SELECT
+    CASE WHEN cid LIKE 'NAS%' THEN substr(cid, 4, length(cid))
+         ELSE cid
+    END cid,
+    CASE WHEN bdate > CURRENT_TIMESTAMP THEN NULL
+        ELSE bdate
+    END AS bdate,
+    CASE WHEN UPPER(TRIM(gen)) IN ('F', 'FEMALE') THEN 'Female'
+    WHEN UPPER(TRIM(gen)) IN ('M', 'MALE') THEN 'Male'
+    ELSE 'N/A'
+    END AS gen
+FROM bronze.erp_cust_az12;
+
+
+SELECT DISTINCT
+    gen
+FROM silver.erp_cust_az12;
+
+SELECT
+        CASE
+            WHEN cid LIKE 'NAS%' THEN SUBSTRING(cid, 4, LENGTH(cid))
+            ELSE cid
+        END AS cid,
+        CASE
+            WHEN bdate > CURRENT_DATE THEN NULL
+            ELSE bdate
+        END AS bdate,
+        CASE
+            WHEN UPPER(TRIM(gen)) IN ('F', 'FEMALE') THEN 'Female'
+            WHEN UPPER(TRIM(gen)) IN ('M', 'MALE') THEN 'Male'
+            ELSE 'n/a'
+        END AS gen
+    FROM bronze.erp_cust_az12;
+-------------------------------------------
+-- ERP_LOC_a101
+SELECT
+    replace(cid, '-', '') cid,
+    cntry
+FROM bronze.erp_loc_a101
+WHERE replace(cid, '-', '') not in(SELECT
+    cst_key
+FROM silver.crm_cust_info);
+
+SELECT
+    cst_key
+FROM silver.crm_cust_info;
+
+SELECT
+    *
+FROM silver.erp_cust_az12;
+
+TRUNCATE TABLE silver.erp_loc_a101;
+INSERT INTO silver.erp_loc_a101(cid, cntry)
+SELECT
+    replace(cid, '-', '') cid,
+    CASE WHEN TRIM(cntry) IN('US', 'USA') THEN 'United States'
+         WHEN TRIM(cntry) = 'DE' THEN 'Germany'
+         WHEN TRIM(cntry) = '' OR cntry IS NULL THEN 'N/A'
+    ELSE TRIM(cntry)
+    END AS cntry
+FROM bronze.erp_loc_a101;
+
+-- Check consistency for cntry IN ERP_LOC_a101
+SELECT DISTINCT
+    cntry as old_one,
+     CASE WHEN TRIM(cntry) IN('US', 'USA') THEN 'United States'
+         WHEN TRIM(cntry) = 'DE' THEN 'Germany'
+         WHEN TRIM(cntry) = '' OR cntry IS NULL THEN 'N/A'
+    ELSE TRIM(cntry)
+    END AS cntry
+FROM bronze.erp_loc_a101;
+
+-- erp_px_cat_g1v2
+TRUNCATE TABLE silver.erp_px_cat_g1v2;
+INSERT INTO silver.erp_px_cat_g1v2(id, cat, subcat, maintenance)
+SELECT
+    id,
+    cat,
+    subcat,
+    maintenance
+FROM bronze.erp_px_cat_g1v2;
+
+SELECT
+    *
+FROM silver.crm_prd_info;
+
+-- erp_px_cat_g1v2 CHECK!
+
+SELECT * FROM bronze.erp_px_cat_g1v2
+WHERE cat != TRIM(cat);
+
+SELECT * FROM bronze.erp_px_cat_g1v2
+WHERE subcat != TRIM(subcat);
+
+SELECT * FROM bronze.erp_px_cat_g1v2
+WHERE maintenance != TRIM(maintenance);
+
+-- DATA STANDARDIZATION AND CONSISTENCY
+SELECT DISTINCT
+    cat
+FROM bronze.erp_px_cat_g1v2;
+
+SELECT DISTINCT
+    subcat
+FROM bronze.erp_px_cat_g1v2;
+
+SELECT DISTINCT
+    maintenance
+FROM bronze.erp_px_cat_g1v2;
 
